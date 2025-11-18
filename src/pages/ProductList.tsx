@@ -1,84 +1,211 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, useCallback } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { addToCart } from "../utils/cartUtils";
+import { auth } from "../firebase";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase";
+import { MessageCircle } from "lucide-react"; // FAQ icon from lucide-react
+import fallbackImage from "../assets/mkp.jpg";
 
 interface Product {
     id: number;
     title: string;
     price: number;
     thumbnail: string;
+    description?: string;
+    category?: string;
+    brand?: string;
 }
 
 export default function ProductList() {
     const [products, setProducts] = useState<Product[]>([]);
+    const [loading, setLoading] = useState<boolean>(true);
+    const [error, setError] = useState<string | null>(null);
+    const navigate = useNavigate();
 
-    useEffect(() => {
-        fetch("https://dummyjson.com/products")
-            .then((res) => res.json())
-            .then((data) => setProducts(data.products || []))
-            .catch((err) => console.error(err));
+    const loadProducts = useCallback(async () => {
+        try {
+            setLoading(true);
+            setError(null);
+
+            const response = await fetch("https://dummyjson.com/products");
+            if (!response.ok) {
+                throw new Error(`Request failed with status ${response.status}`);
+            }
+
+            const data = await response.json();
+            setProducts(data.products || []);
+        } catch (err) {
+            console.error("Failed to fetch products:", err);
+            setError(
+                "We couldn't load products right now. Please check your connection and try again."
+            );
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    const handleAddToCart = (product: Product) => {
-        addToCart(product);
-        alert(`✨ ${product.title} added to your cart 🛍️`);
+    useEffect(() => {
+        loadProducts();
+    }, [loadProducts]);
+
+    const handleAddToCart = async (product: Product) => {
+        try {
+            await addToCart(product);
+
+            const user = auth.currentUser;
+            if (user) {
+                const cartRef = doc(db, "carts", user.uid);
+                const snapshot = await getDoc(cartRef);
+                if (!snapshot.exists()) {
+                    await setDoc(
+                        cartRef,
+                        {
+                            customer: {
+                                name: user.displayName || "",
+                                email: user.email || "",
+                                phone: "",
+                                address: "",
+                                items: [],
+                            },
+                            updatedAt: serverTimestamp(),
+                        },
+                        { merge: true }
+                    );
+                }
+            }
+
+            alert(`${product.title} added to your cart`);
+        } catch (error) {
+            const message =
+                auth.currentUser && (error as any)?.code === "permission-denied"
+                    ? "You do not have permission to add items. Please check your Firestore rules."
+                    : "Failed to add item to cart. Please try again.";
+            alert(message);
+            console.error("Add to cart failed:", error);
+        }
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-[#D0E6FA] via-[#FDE2F3] to-[#E0F7FA] p-8 relative">
-            <h1 className="text-4xl font-extrabold text-center mb-12 text-[#023859] drop-shadow-lg">
-                💕 Our Cute Product Collection 💕
-            </h1>
+        <div className="min-h-screen bg-gradient-to-b from-blue-50 via-white to-blue-50 text-gray-800 flex flex-col">
+            {/* 🔹 Hero Section */}
+            <section className="bg-gradient-to-r from-[#056EA5] via-[#034F7B] to-[#023859] text-white py-20 text-center shadow-md">
+                <h2 className="text-4xl font-extrabold mb-4 drop-shadow">
+                    Discover Quality Products
+                </h2>
+                <p className="text-lg mb-6 opacity-90">
+                    Shop the latest and greatest with confidence and comfort.
+                </p>
+                <button
+                    onClick={() => {
+                        const productsSection = document.getElementById("products");
+                        productsSection?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                    className="inline-block bg-white text-[#023859] font-semibold px-6 py-3 rounded-full shadow hover:bg-gray-100 transition-all duration-300"
+                >
+                    Browse Collection
+                </button>
+            </section>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-8 place-items-center">
-                {products.map((p) => (
-                    <div
-                        key={p.id}
-                        className="bg-white rounded-3xl border-2 border-[#023859] shadow-md p-6 flex flex-col items-center text-center transition-all hover:scale-105 hover:shadow-xl hover:bg-gradient-to-br from-[#E0F2FF] to-[#FFF0F5]"
-                    >
-                        <div className="relative">
-                            <img
-                                src={p.thumbnail || ""}
-                                alt={p.title || "Product"}
-                                className="w-48 h-48 object-cover rounded-2xl mb-4 shadow-sm transition-transform hover:scale-110"
-                            />
-                            <span className="absolute top-2 right-2 bg-[#023859] text-white text-xs px-2 py-1 rounded-full shadow">
-                                ✨ New
-                            </span>
-                        </div>
+            {/* 🔹 Product Grid Section */}
+            <main id="products" className="flex-1 max-w-7xl mx-auto px-6 py-16">
+                <h3 className="text-3xl font-semibold text-gray-800 text-center mb-10">
+                    Featured Products
+                </h3>
 
-                        <h2 className="text-lg font-semibold text-[#023859] mb-1">
-                            {p.title.length > 25 ? p.title.slice(0, 25) + "..." : p.title}
-                        </h2>
+                {loading && (
+                    <p className="text-center text-gray-600 py-10">
+                        Loading products...
+                    </p>
+                )}
 
-                        <p className="text-[#034F7B] font-bold text-lg mb-4">
-                            💸 ${p.price}
-                        </p>
-
-                        <div className="flex gap-3">
-                            <button
-                                onClick={() => handleAddToCart(p)}
-                                className="bg-gradient-to-r from-[#056EA5] to-[#023859] text-white px-4 py-2 rounded-full font-medium shadow-md hover:scale-105 hover:shadow-lg transition"
-                            >
-                                🛒 Add to Cart
-                            </button>
-
-                            <Link
-                                to={`/product/${p.id}`}
-                                className="border-2 border-[#023859] text-[#023859] px-4 py-2 rounded-full font-medium hover:bg-[#023859]/10 transition"
-                            >
-                                👀 View
-                            </Link>
-                        </div>
+                {!loading && error && (
+                    <div className="text-center text-red-500 py-10">
+                        <p className="mb-4">{error}</p>
+                        <button
+                            onClick={loadProducts}
+                            className="px-6 py-2 rounded-full font-semibold shadow hover:scale-105 transition"
+                            style={{
+                                background: "linear-gradient(to right, #056EA5, #034F7B)",
+                                color: "white",
+                            }}
+                        >
+                            Try Again
+                        </button>
                     </div>
-                ))}
-            </div>
+                )}
 
-            {/* Floating cute elements */}
-            <div className="fixed bottom-6 right-6 text-3xl animate-bounce">💖</div>
-            <div className="fixed top-10 left-8 text-3xl animate-pulse">🌸</div>
-            <div className="fixed top-1/2 right-10 text-3xl animate-bounce">🩷</div>
-            <div className="fixed bottom-20 left-20 text-3xl animate-pulse">⭐</div>
+                {!loading && !error && products.length === 0 && (
+                    <p className="text-center text-gray-600 py-10">
+                        No products available right now. Please check back later.
+                    </p>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-10">
+                    {products.map((p) => (
+                        <div
+                            key={p.id}
+                            className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-md hover:shadow-xl transition-all duration-300 flex flex-col overflow-hidden"
+                        >
+                            {/* Product Image */}
+                            <div className="relative">
+                                <img
+                                    src={p.thumbnail}
+                                    alt={p.title}
+                                    onError={(event) => {
+                                        const target = event.currentTarget;
+                                        if (target.src !== fallbackImage) {
+                                            target.src = fallbackImage;
+                                        }
+                                    }}
+                                    className="w-full h-60 object-cover"
+                                />
+                                <span className="absolute top-3 right-3 bg-gradient-to-r from-[#056EA5] to-[#023859] text-white text-xs font-semibold px-2 py-1 rounded-full shadow">
+                                    New
+                                </span>
+                            </div>
+
+                            {/* Product Info */}
+                            <div className="flex-1 flex flex-col justify-between p-5">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1 truncate">
+                                        {p.title}
+                                    </h3>
+                                    <p className="text-gray-700 dark:text-gray-300 font-bold mb-4">
+                                        ${p.price.toFixed(2)}
+                                    </p>
+                                </div>
+
+                                {/* ✅ Buttons Row */}
+                                <div className="flex items-center justify-between gap-3 whitespace-nowrap">
+                                    <button
+                                        onClick={() => handleAddToCart(p)}
+                                        className="flex-1 bg-gradient-to-r from-[#056EA5] to-[#023859] hover:opacity-90 text-white text-sm font-medium py-2 rounded-md transition-all duration-200"
+                                    >
+                                        Add to Cart
+                                    </button>
+
+                                    <Link
+                                        to={`/product/${p.id}`}
+                                        className="flex-1 border border-[#056EA5] text-[#056EA5] hover:bg-[#056EA5] hover:text-white text-sm font-medium py-2 rounded-md text-center transition-all duration-200"
+                                    >
+                                        View
+                                    </Link>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </main>
+
+            {/* 🔹 Floating FAQ Icon */}
+            <button
+                onClick={() => navigate("/faqs")}
+                className="fixed bottom-6 right-6 bg-gradient-to-r from-[#056EA5] to-[#023859] text-white p-4 rounded-full shadow-lg hover:scale-110 hover:shadow-2xl transition-all duration-300"
+                title="Frequently Asked Questions"
+            >
+                <MessageCircle size={28} />
+            </button>
         </div>
     );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { addToCart } from "../utils/cartUtils";
+import fallbackImage from "../assets/mkp.jpg";
 
 interface Product {
     id: number;
@@ -9,6 +10,8 @@ interface Product {
     price: number;
     thumbnail: string;
     images?: string[];
+    brand?: string;
+    category?: string;
 }
 
 export default function ProductDetail() {
@@ -17,13 +20,10 @@ export default function ProductDetail() {
     const [product, setProduct] = useState<Product | null>(null);
     const [loading, setLoading] = useState(true);
     const [mainImage, setMainImage] = useState<string>("");
+    const [quantity, setQuantity] = useState(1);
 
     useEffect(() => {
-        if (!id) {
-            setLoading(false);
-            return;
-        }
-
+        if (!id) return;
         fetch(`https://dummyjson.com/products/${id}`)
             .then((res) => res.json())
             .then((data) => {
@@ -34,99 +34,153 @@ export default function ProductDetail() {
             .catch(() => setLoading(false));
     }, [id]);
 
-    const handleAddToCart = () => {
-        if (product) {
-            addToCart(product);
-            alert(`✨ ${product.title} added to your cart 🛍️`);
+    const handleAddToCart = async () => {
+        if (!product) return;
+
+        try {
+            await addToCart(
+                {
+                    id: product.id,
+                    title: product.title,
+                    price: product.price,
+                    thumbnail: product.thumbnail,
+                    brand: product.brand,
+                    category: product.category,
+                },
+                quantity
+            );
+            alert(`✅ ${product.title} added to cart!`);
             navigate("/cart");
+        } catch (error) {
+            alert("Failed to add item to cart. Please try again.");
         }
     };
 
     if (loading)
         return (
-            <div className="min-h-screen flex justify-center items-center text-[#023859] text-xl">
-                Loading... 💖
+            <div className="h-screen flex justify-center items-center text-[#023859] text-xl bg-gradient-to-b from-blue-50 via-white to-blue-50">
+                Loading...
             </div>
         );
 
     if (!product)
         return (
-            <div className="min-h-screen flex justify-center items-center text-[#023859] text-xl">
+            <div className="h-screen flex justify-center items-center text-[#023859] text-xl bg-gradient-to-b from-blue-50 via-white to-blue-50">
                 Product not found 😢
             </div>
         );
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 flex flex-col lg:flex-row justify-center items-center p-10 gap-10 relative">
-            {/* Left Content */}
-            <div className="max-w-md space-y-6 bg-white/70 backdrop-blur-lg border border-[#023859] rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all">
-                <h1 className="text-4xl font-bold text-[#023859]">
-                    {product.title || "Untitled Product"}
-                </h1>
-                <p className="text-[#023859] text-lg">
-                    {product.description || "No description available."}
-                </p>
+        <div className="fixed inset-0 flex justify-center items-center bg-gradient-to-r from-[#E6F0FA] via-white to-[#DCEBFA] overflow-hidden">
+            {/* Optional soft background glow */}
+            <div className="fixed inset-0 bg-[radial-gradient(circle_at_center,_rgba(5,110,165,0.05),_transparent_70%)] pointer-events-none"></div>
 
-                <p className="text-3xl font-bold text-pink-600">
-                    💸 ${product.price?.toFixed(2) || "0.00"}
-                </p>
-
-                <div className="flex gap-4 mt-6">
-                    <button
-                        onClick={handleAddToCart}
-                        className="bg-gradient-to-r from-pink-500 to-purple-500 text-white px-6 py-3 rounded-full font-semibold shadow-md hover:scale-105 hover:shadow-lg transition"
-                    >
-                        🛒 Add to Cart
-                    </button>
-
-                    <button
-                        onClick={() => navigate(-1)}
-                        className="border border-[#023859] text-[#023859] px-6 py-3 rounded-full font-semibold hover:bg-[#023859]/10 transition"
-                    >
-                        ← Back
-                    </button>
-                </div>
-            </div>
-
-            {/* Right Product Image Section */}
-            <div className="relative flex flex-col items-center">
-                <div className="absolute -top-6 -left-6 w-80 h-80 bg-[#023859]/20 rounded-full blur-3xl opacity-30"></div>
-                {mainImage ? (
-                    <img
-                        src={mainImage}
-                        alt={product.title}
-                        className="w-[400px] h-[400px] object-cover rounded-3xl shadow-xl z-10 relative hover:scale-105 transition-transform"
-                    />
-                ) : (
-                    <div className="w-[400px] h-[400px] flex items-center justify-center bg-[#023859]/10 rounded-3xl text-[#023859] font-semibold">
-                        No Image
+            {/* Main Card */}
+            <div className="relative z-10 w-[85vw] max-w-6xl flex flex-col md:flex-row rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md bg-white/80 border border-gray-200">
+                {/* Left Section - Image */}
+                <div className="md:w-1/2 flex flex-col justify-center items-center p-6 bg-gradient-to-br from-[#F8FBFF] to-[#EAF4FF]">
+                    <div className="flex-1 flex justify-center items-center">
+                        {mainImage ? (
+                            <img
+                                src={mainImage}
+                                alt={product.title}
+                                onError={(event) => {
+                                    const target = event.currentTarget;
+                                    if (target.src !== fallbackImage) {
+                                        target.src = fallbackImage;
+                                        setMainImage(fallbackImage);
+                                    }
+                                }}
+                                className="w-[280px] h-[280px] object-cover rounded-3xl shadow-lg hover:scale-105 transition-transform duration-300"
+                            />
+                        ) : (
+                            <div className="w-[280px] h-[280px] flex items-center justify-center bg-gray-100 rounded-2xl text-gray-600 font-semibold shadow-inner">
+                                No Image
+                            </div>
+                        )}
                     </div>
-                )}
 
-                <div className="flex gap-3 justify-center mt-5">
-                    {product.images && product.images.length > 0 ? (
-                        product.images.slice(0, 4).map((img, i) => (
+                    {/* Thumbnails */}
+                    <div className="flex justify-center gap-3 mt-4 flex-wrap">
+                        {product.images?.slice(0, 4).map((img, i) => (
                             <img
                                 key={i}
                                 src={img}
                                 alt={`${product.title}-${i}`}
                                 onClick={() => setMainImage(img)}
-                                className={`w-20 h-20 object-cover rounded-xl cursor-pointer border-2 ${mainImage === img
-                                    ? "border-[#023859] scale-110"
-                                    : "border-transparent hover:scale-105"
-                                    } transition-all`}
+                                onError={(event) => {
+                                    const target = event.currentTarget;
+                                    if (target.src !== fallbackImage) {
+                                        target.src = fallbackImage;
+                                    }
+                                }}
+                                className={`w-16 h-16 object-cover rounded-xl cursor-pointer border-2 shadow-md transition-all ${mainImage === img
+                                    ? "border-[#056EA5] scale-110"
+                                    : "border-transparent hover:scale-105 hover:shadow-lg"
+                                    }`}
                             />
-                        ))
-                    ) : (
-                        <div className="text-[#023859]/70">No thumbnails</div>
-                    )}
+                        ))}
+                    </div>
+                </div>
+
+                {/* Right Section - Product Info */}
+                <div className="md:w-1/2 flex flex-col justify-between p-8 bg-white/70 backdrop-blur-md">
+                    <div>
+                        <h1 className="text-3xl font-bold text-[#023859] mb-3">
+                            {product.title}
+                        </h1>
+                        <p className="text-gray-700 text-base leading-relaxed mb-6">
+                            {product.description || "No description available."}
+                        </p>
+                    </div>
+
+                    {/* Price & Quantity */}
+                    <div className="flex flex-col gap-6">
+                        <p className="text-3xl font-extrabold text-[#056EA5]">
+                            ${product.price.toFixed(2)}
+                        </p>
+
+                        <div className="flex items-center gap-4">
+                            <span className="text-lg font-semibold text-[#023859]">
+                                Quantity:
+                            </span>
+                            <div className="flex items-center gap-2 bg-[#F0F7FF] px-4 py-2 rounded-lg border border-[#BFD7ED]">
+                                <button
+                                    onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                                    className="text-[#056EA5] text-xl font-bold px-2 hover:scale-110 transition-transform"
+                                >
+                                    -
+                                </button>
+                                <span className="text-lg font-semibold text-[#023859] w-6 text-center">
+                                    {quantity}
+                                </span>
+                                <button
+                                    onClick={() => setQuantity((q) => q + 1)}
+                                    className="text-[#056EA5] text-xl font-bold px-2 hover:scale-110 transition-transform"
+                                >
+                                    +
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Buttons */}
+                        <div className="flex gap-4 mt-4">
+                            <button
+                                onClick={handleAddToCart}
+                                className="flex-1 bg-gradient-to-r from-[#056EA5] to-[#023859] text-white py-3 rounded-lg font-semibold shadow-md hover:opacity-90 hover:scale-[1.02] transition-all duration-200"
+                            >
+                                🛒 Add to Cart
+                            </button>
+                            <button
+                                onClick={() => navigate(-1)}
+                                className="flex-1 border border-[#056EA5] text-[#056EA5] hover:bg-[#056EA5] hover:text-white py-3 rounded-lg font-semibold transition-all duration-200 shadow-sm"
+                            >
+                                ← Back
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
-
-            {/* Decorative floating hearts */}
-            <div className="fixed bottom-6 right-6 text-3xl animate-bounce">💖</div>
-            <div className="fixed top-10 left-8 text-3xl animate-pulse">🌸</div>
-            <div className="fixed top-1/2 right-10 text-3xl animate-bounce">🩷</div>
         </div>
     );
 }
