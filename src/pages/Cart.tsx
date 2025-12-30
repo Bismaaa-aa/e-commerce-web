@@ -1,467 +1,163 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
+import { useCart } from "../context/CartContext";
 import { useNavigate } from "react-router-dom";
-import { auth, db } from "../firebase";
-import {
-    doc,
-    setDoc,
-    onSnapshot,
-    updateDoc,
-    serverTimestamp,
-} from "firebase/firestore";
-import { useAuthState } from "react-firebase-hooks/auth";
-import {
-    clearCartFromStorage,
-    loadCartFromStorage,
-    saveCartToStorage,
-} from "../utils/cartStorage";
-import fallbackImage from "../assets/mkp.jpg";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase";
 
-interface CartItem {
-    id: number;
-    title: string;
-    thumbnail: string;
-    price: number;
-    quantity: number;
-}
+const accent = "#056EA5";
 
 export default function Cart() {
-    const [cart, setCart] = useState<CartItem[]>([]);
-    const [showCheckout, setShowCheckout] = useState(false);
-    const [orderConfirmed, setOrderConfirmed] = useState(false);
-    const [customer, setCustomer] = useState({
-        name: "",
-        email: "",
-        phone: "",
-        address: "",
-    });
-    const isInitialMount = useRef(true);
-    const skipSyncRef = useRef(false);
-    const hasMergedLocalCart = useRef(false);
-    const navigate = useNavigate();
-    const accentColor = "#056EA5";
-    const [user, loadingAuth] = useAuthState(auth);
-    const uid = user?.uid || null;
+  const { cart, addItem, decreaseItem, removeItem, userEmail } = useCart();
+  const navigate = useNavigate();
+  const [stockMap, setStockMap] = useState<{ [key: string]: number }>({});
 
-    // ✅ Load cart from Firestore or localStorage
-    useEffect(() => {
-        if (loadingAuth) return;
+  // Load latest stock for cart items
+  const fetchStock = async () => {
+    const map: { [key: string]: number } = {};
+    for (const item of cart) {
+      const snap = await getDoc(doc(db, "products", item.id));
+      map[item.id] = snap.exists() ? snap.data().quantity : 0;
+    }
+    setStockMap(map);
+  };
 
-        if (user) {
-            const storedUserCart = loadCartFromStorage<CartItem>(uid);
-            const storedGuestCart = loadCartFromStorage<CartItem>(null);
-            const cartRef = doc(db, "carts", user.uid);
-            hasMergedLocalCart.current = false;
-            const unsubscribe = onSnapshot(cartRef, async (snapshot) => {
-                if (snapshot.exists()) {
-                    const data = snapshot.data();
-                    console.log("Firestore cart snapshot:", data.customer?.items);
-                    let firestoreCart: CartItem[] = data.customer?.items || [];
+  useEffect(() => {
+    fetchStock();
+  }, [cart]);
 
-                    // Merge localStorage cart with Firestore cart
-                    if (
-                        !hasMergedLocalCart.current &&
-                        (storedUserCart.length > 0 || storedGuestCart.length > 0)
-                    ) {
-                        const mergedCart = [...firestoreCart];
-                        const cartsToMerge = [...storedUserCart, ...storedGuestCart];
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-                        cartsToMerge.forEach((localItem) => {
-                            const index = mergedCart.findIndex((i) => i.id === localItem.id);
-                            if (index >= 0) {
-                                mergedCart[index].quantity += localItem.quantity;
-                            } else {
-                                mergedCart.push(localItem);
-                            }
-                        });
+  const handleIncrease = (item: any) => {
+    const available = stockMap[item.id] ?? 0;
+    if (item.quantity < available) addItem(item);
+    else alert(`No more stock for "${item.title}"`);
+  };
 
-                        // Update Firestore with merged cart
-                        await setDoc(cartRef, {
-                            customer: {
-                                ...data.customer,
-                                items: mergedCart,
-                            },
-                            updatedAt: serverTimestamp(),
-                        });
+  const handleDecrease = (item: any) => decreaseItem(item);
+  const handleRemove = (item: any) => removeItem(item.id);
 
-                        setCart(mergedCart);
-                        skipSyncRef.current = true;
-                        if (storedUserCart.length > 0) {
-                            clearCartFromStorage(uid);
-                        }
-                        if (storedGuestCart.length > 0) {
-                            clearCartFromStorage(null);
-                        }
-                        hasMergedLocalCart.current = true;
-                    } else {
-                        setCart(firestoreCart);
-                        skipSyncRef.current = true;
-                    }
+  const continueShopping = () => navigate("/shop");
 
-                    setCustomer({
-                        name: data.customer?.name || user.displayName || "",
-                        email: data.customer?.email || user.email || "",
-                        phone: data.customer?.phone || "",
-                        address: data.customer?.address || "",
-                    });
-                } else {
-                    // Initialize cart for new user
-                    const initialCart = [...storedUserCart, ...storedGuestCart];
-                    if (initialCart.length > 0) {
-                        await setDoc(cartRef, {
-                            customer: {
-                                items: initialCart,
-                                name: user.displayName || "",
-                                email: user.email || "",
-                                phone: "",
-                                address: "",
-                            },
-                            updatedAt: serverTimestamp(),
-                        });
-                        setCart(initialCart);
-                        skipSyncRef.current = true;
-                    } else {
-                        setCart([]);
-                        skipSyncRef.current = true;
-                    }
-                    if (storedUserCart.length > 0) {
-                        clearCartFromStorage(uid);
-                    }
-                    if (storedGuestCart.length > 0) {
-                        clearCartFromStorage(null);
-                    }
-                    hasMergedLocalCart.current = true;
-                }
-            });
-
-            return () => unsubscribe();
-        } else {
-            const guestCart = loadCartFromStorage<CartItem>(null);
-            hasMergedLocalCart.current = false;
-            setCart(guestCart);
-            skipSyncRef.current = true;
-        }
-    }, [user, uid, loadingAuth]);
-
-    // ✅ Save cart to Firestore or localStorage when cart changes
-    useEffect(() => {
-        if (isInitialMount.current) {
-            isInitialMount.current = false;
-            return;
-        }
-
-        if (skipSyncRef.current) {
-            skipSyncRef.current = false;
-            return;
-        }
-
-        if (loadingAuth) return;
-
-        if (user) {
-            const cartRef = doc(db, "carts", user.uid);
-            updateDoc(cartRef, {
-                "customer.items": cart,
-                updatedAt: serverTimestamp(),
-            }).catch(async () => {
-                await setDoc(cartRef, {
-                    customer: {
-                        items: cart,
-                        name: user.displayName || "",
-                        email: user.email || "",
-                        phone: "",
-                        address: "",
-                    },
-                    updatedAt: serverTimestamp(),
-                });
-            });
-        } else {
-            saveCartToStorage(cart, null);
-        }
-    }, [cart, user, loadingAuth, uid]);
-
-    // ✅ Cart functions
-    const increaseQuantity = (id: number) =>
-        setCart((prev) =>
-            prev.map((item) =>
-                item.id === id ? { ...item, quantity: item.quantity + 1 } : item
-            )
-        );
-
-    const decreaseQuantity = (id: number) =>
-        setCart((prev) =>
-            prev
-                .map((item) =>
-                    item.id === id
-                        ? { ...item, quantity: item.quantity > 1 ? item.quantity - 1 : 1 }
-                        : item
-                )
-                .filter((item) => item.quantity > 0)
-        );
-
-    const removeFromCart = (id: number) =>
-        setCart((prev) => prev.filter((item) => item.id !== id));
-
-    const totalPrice = cart.reduce(
-        (total, item) => total + item.price * item.quantity,
-        0
-    );
-
-    const handleProceedToCheckout = () => setShowCheckout(true);
-
-    const handleCustomerChange = (
-        e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-    ) => {
-        setCustomer({ ...customer, [e.target.name]: e.target.value });
-    };
-
-    // ✅ Checkout
-    const handleCheckoutSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (user) {
-            const orderRef = doc(db, "orders", `${user.uid}_${Date.now()}`);
-            await setDoc(orderRef, {
-                customer,
-                items: cart,
-                totalPrice,
-                userId: user.uid,
-                date: serverTimestamp(),
-            });
-
-            // Clear cart after order
-            const cartRef = doc(db, "carts", user.uid);
-            await updateDoc(cartRef, { "customer.items": [] });
-        } else {
-            clearCartFromStorage(null);
-        }
-
-        setOrderConfirmed(true);
-        setCart([]);
-        setShowCheckout(false);
-        setTimeout(() => navigate("/"), 2000);
-    };
-
-    // ✅ Confirmation screen
-    if (orderConfirmed) {
-        return (
-            <div className="min-h-screen flex flex-col justify-center items-center bg-gradient-to-br from-white to-gray-100 text-center p-6 animate-fadeIn">
-                <h1
-                    className="text-5xl font-bold mb-4 animate-bounce"
-                    style={{ color: accentColor }}
-                >
-                    🎉 Order Confirmed!
-                </h1>
-                <p className="text-lg text-gray-700 mb-6">
-                    Thank you {customer.name || ""} for shopping with us 💖<br />
-                    Your order is on its way!
-                </p>
-                <button
-                    onClick={() => navigate("/")}
-                    className="px-8 py-3 rounded-full font-semibold shadow-lg hover:scale-105 transition"
-                    style={{
-                        background: `linear-gradient(to right, ${accentColor}, #034F7B)`,
-                        color: "white",
-                    }}
-                >
-                    Back to Home 🏠
-                </button>
-            </div>
-        );
+  const proceedToCheckout = async () => {
+    // Validate stock before sending to backend
+    for (const item of cart) {
+      const available = stockMap[item.id] ?? 0;
+      if (item.quantity > available) {
+        alert(`Not enough stock for "${item.title}". Max available: ${available}`);
+        return;
+      }
     }
 
-    // ✅ Render cart
+    try {
+      const res = await fetch("http://localhost:5000/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cartItems: cart }),
+      });
+
+      const data = await res.json();
+      if (data.error) {
+        alert(data.error);
+        return;
+      }
+
+      window.location.href = data.url;
+    } catch (err) {
+      console.error(err);
+      alert("Checkout failed. Please try again.");
+    }
+  };
+
+  if (cart.length === 0) {
     return (
-        <div className="min-h-screen p-6 bg-gradient-to-br from-white to-gray-100">
-            <h1
-                className="text-4xl font-bold mb-6 text-center"
-                style={{ color: accentColor }}
-            >
-                🛒 Your Cart
-            </h1>
-
-            {cart.length === 0 ? (
-                <div className="flex flex-col items-center justify-center mt-20 text-center space-y-6">
-                    <div className="text-6xl animate-bounce" style={{ color: accentColor }}>
-                        🛍️✨
-                    </div>
-                    <h2 className="text-3xl font-bold" style={{ color: accentColor }}>
-                        Your cart is empty!
-                    </h2>
-                    <p className="text-gray-700 max-w-xs">
-                        Oops! You haven’t added anything yet. Explore our products and fill your cart
-                        with joy! 💖
-                    </p>
-                    <button
-                        onClick={() => navigate("/shop")}
-                        className="px-6 py-3 rounded-full font-semibold shadow-lg hover:scale-105 transition"
-                        style={{
-                            background: `linear-gradient(to right, ${accentColor}, #034F7B)`,
-                            color: "white",
-                        }}
-                    >
-                        Start Shopping 🛒
-                    </button>
-                </div>
-            ) : (
-                <>
-                    <div className="space-y-4">
-                        {cart.map((item) => (
-                            <div
-                                key={item.id}
-                                className="flex justify-between items-center border-b py-4 bg-white rounded-2xl shadow-sm px-4"
-                                style={{ borderColor: accentColor }}
-                            >
-                                <div className="flex items-center gap-4">
-                                    <img
-                                        src={item.thumbnail}
-                                        alt={item.title}
-                                        onError={(event) => {
-                                            const target = event.currentTarget;
-                                            if (target.src !== fallbackImage) {
-                                                target.src = fallbackImage;
-                                            }
-                                        }}
-                                        className="w-16 h-16 object-cover rounded-xl"
-                                    />
-                                    <div>
-                                        <h2 className="font-semibold text-gray-800">{item.title}</h2>
-                                        <p className="text-sm text-gray-500">
-                                            ${item.price} × {item.quantity} ={" "}
-                                            <span className="font-bold" style={{ color: accentColor }}>
-                                                ${(item.price * item.quantity).toFixed(2)}
-                                            </span>
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => decreaseQuantity(item.id)}
-                                        className="px-3 py-1 rounded-lg text-lg"
-                                        style={{ backgroundColor: `${accentColor}22` }}
-                                    >
-                                        −
-                                    </button>
-                                    <span className="font-semibold text-gray-800">{item.quantity}</span>
-                                    <button
-                                        onClick={() => increaseQuantity(item.id)}
-                                        className="px-3 py-1 rounded-lg text-lg"
-                                        style={{ backgroundColor: `${accentColor}22` }}
-                                    >
-                                        +
-                                    </button>
-                                    <button
-                                        onClick={() => removeFromCart(item.id)}
-                                        className="text-red-500 ml-3 text-xl hover:scale-110 transition-transform"
-                                    >
-                                        🗑️
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-
-                    <div className="flex justify-between mt-8 text-2xl font-bold bg-white p-4 rounded-2xl shadow-md">
-                        <span>Total:</span>
-                        <span style={{ color: accentColor }}>${totalPrice.toFixed(2)}</span>
-                    </div>
-
-                    {/* ✅ Added Continue Shopping Button Below */}
-                    <div className="text-center mt-6 flex flex-col items-center gap-3">
-                        <button
-                            onClick={handleProceedToCheckout}
-                            className="px-8 py-2 rounded-full font-semibold shadow-lg hover:scale-105 transition"
-                            style={{
-                                background: `linear-gradient(to right, ${accentColor}, #034F7B)`,
-                                color: "white",
-                            }}
-                        >
-                            Proceed to Checkout 💖
-                        </button>
-
-                        <button
-                            onClick={() => navigate("/shop")}
-                            className="px-8 py-2 rounded-full font-semibold shadow hover:scale-105 transition"
-                            style={{
-                                backgroundColor: "#f3f4f6",
-                                color: accentColor,
-                                border: `2px solid ${accentColor}`,
-                            }}
-                        >
-                            Continue Shopping 🛍️
-                        </button>
-                    </div>
-                </>
-            )}
-
-            {/* Checkout Modal */}
-            {showCheckout && (
-                <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
-                    <form
-                        onSubmit={handleCheckoutSubmit}
-                        className="bg-white rounded-2xl p-6 w-full max-w-md flex flex-col gap-4 shadow-lg"
-                    >
-                        <h2
-                            className="text-2xl font-bold text-center"
-                            style={{ color: accentColor }}
-                        >
-                            📝 Your Details
-                        </h2>
-                        <input
-                            type="text"
-                            name="name"
-                            placeholder="Full Name"
-                            value={customer.name}
-                            onChange={handleCustomerChange}
-                            required
-                            className="p-3 border rounded-lg"
-                        />
-                        <input
-                            type="email"
-                            name="email"
-                            placeholder="Email Address"
-                            value={customer.email}
-                            onChange={handleCustomerChange}
-                            required
-                            className="p-3 border rounded-lg"
-                        />
-                        <input
-                            type="tel"
-                            name="phone"
-                            placeholder="Phone Number"
-                            value={customer.phone}
-                            onChange={handleCustomerChange}
-                            required
-                            className="p-3 border rounded-lg"
-                        />
-                        <textarea
-                            name="address"
-                            placeholder="Shipping Address"
-                            value={customer.address}
-                            onChange={handleCustomerChange}
-                            required
-                            className="p-3 border rounded-lg resize-none"
-                        />
-                        <div className="flex justify-between mt-2">
-                            <button
-                                type="button"
-                                onClick={() => setShowCheckout(false)}
-                                className="px-4 py-2 rounded-full font-semibold shadow hover:scale-105 transition"
-                                style={{ background: `#ccc`, color: "#333" }}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="submit"
-                                className="px-6 py-2 rounded-full font-semibold shadow hover:scale-105 transition"
-                                style={{
-                                    background: `linear-gradient(to right, ${accentColor}, #034F7B)`,
-                                    color: "white",
-                                }}
-                            >
-                                Place Order 💖
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            )}
-        </div>
+      <div className="min-h-screen flex items-center justify-center text-center p-6">
+        <h2 className="text-2xl font-semibold" style={{ color: accent }}>
+          Your cart is empty.
+        </h2>
+      </div>
     );
+  }
+
+  return (
+    <div className="min-h-screen p-6 bg-gradient-to-br from-white to-gray-100 max-w-3xl mx-auto">
+      <h1 className="text-3xl font-bold mb-6 text-center" style={{ color: accent }}>
+        🛒 Shopping Cart
+      </h1>
+
+      <div className="space-y-4">
+        {cart.map(item => {
+          const maxStock = stockMap[item.id] ?? 0;
+          const reachedLimit = item.quantity >= maxStock;
+
+          return (
+            <div
+              key={item.id}
+              className="flex justify-between items-center border p-4 bg-white rounded-2xl shadow-sm"
+              style={{ borderColor: accent }}
+            >
+              <div className="flex-1">
+                <h2 className="font-semibold text-gray-800 text-lg">{item.title}</h2>
+                <p className="text-sm text-gray-500">${item.price.toFixed(2)}</p>
+                <p className="text-xs text-gray-400 mt-1">Stock available: {maxStock}</p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => handleDecrease(item)}
+                  disabled={item.quantity === 1}
+                  className="w-8 h-8 bg-gray-200 rounded-full hover:bg-gray-300 transition disabled:opacity-50"
+                >
+                  −
+                </button>
+
+                <span className="font-medium w-6 text-center">{item.quantity}</span>
+
+                <button
+                  onClick={() => handleIncrease(item)}
+                  disabled={reachedLimit || maxStock === 0}
+                  className="w-8 h-8 bg-gray-200 rounded-full hover:bg-gray-300 transition disabled:opacity-50"
+                >
+                  +
+                </button>
+
+                <button
+                  onClick={() => handleRemove(item)}
+                  className="text-red-500 text-xl hover:scale-110 transition"
+                >
+                  🗑
+                </button>
+              </div>
+
+              {reachedLimit && (
+                <p className="text-xs text-red-500 ml-2">Max quantity reached</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-between mt-8 text-xl font-bold bg-white p-4 rounded-2xl shadow">
+        <span>Total:</span>
+        <span style={{ color: accent }}>${total.toFixed(2)}</span>
+      </div>
+
+      <div className="mt-6 flex justify-between">
+        <button
+          onClick={continueShopping}
+          className="px-6 py-2 rounded-full border font-medium"
+          style={{ color: accent, borderColor: accent }}
+        >
+          Continue Shopping
+        </button>
+
+        <button
+          onClick={proceedToCheckout}
+          className="px-6 py-2 rounded-full text-white font-medium"
+          style={{ background: accent }}
+        >
+          Checkout
+        </button>
+      </div>
+    </div>
+  );
 }

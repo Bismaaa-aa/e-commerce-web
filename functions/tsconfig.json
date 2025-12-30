@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "module": "commonjs", // Firebase expects commonjs modules
+    "target": "ES2020", // modern JS features
+    "lib": [
+      "ES2020"
+    ], // include standard JS libs
+    "outDir": "lib", // compiled files go here
+    "rootDir": "src", // source files location
+    "strict": true, // strict TS checks
+    "esModuleInterop": true, // allows import x from 'y'
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true, // skip type check for node_modules
+    "noImplicitReturns": true, // keep this
+    "noUnusedLocals": false // allow unused imports temporarily
+  },
+  "include": [
+    "src"
+  ]
+}

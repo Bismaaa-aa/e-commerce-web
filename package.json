@@ -10,15 +10,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@stripe/stripe-js": "^8.4.0",
+    "@stripe/stripe-js": "^8.5.1",
+    "axios": "^1.13.2",
     "firebase": "^12.4.0",
+    "firebase-admin": "^13.6.0",
+    "firebase-functions": "^7.0.2",
     "lucide-react": "^0.545.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-firebase-hooks": "^5.1.1",
     "react-router-dom": "^7.9.4",
     "react-simple-typewriter": "^5.0.1",
-    "stripe": "^19.3.0"
+    "stripe": "^19.3.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

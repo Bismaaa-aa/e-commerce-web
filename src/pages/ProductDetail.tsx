@@ -1,17 +1,15 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { addToCart } from "../utils/cartUtils";
+import { useCart } from "../context/CartContext";
 import fallbackImage from "../assets/mkp.jpg";
 
 interface Product {
-    id: number;
+    id: string;
     title: string;
-    description: string;
+    description?: string;
     price: number;
-    thumbnail: string;
-    images?: string[];
-    brand?: string;
-    category?: string;
+    image?: string;
+    quantity: number;
 }
 
 export default function ProductDetail() {
@@ -19,165 +17,114 @@ export default function ProductDetail() {
     const navigate = useNavigate();
     const [product, setProduct] = useState<Product | null>(null);
     const [loading, setLoading] = useState(true);
-    const [mainImage, setMainImage] = useState<string>("");
     const [quantity, setQuantity] = useState(1);
+    const { addItem, cart, requireLogin, userEmail } = useCart();
 
     useEffect(() => {
         if (!id) return;
-        fetch(`https://dummyjson.com/products/${id}`)
-            .then((res) => res.json())
-            .then((data) => {
-                setProduct(data);
-                setMainImage(data.thumbnail || "");
+        const fetchProduct = async () => {
+            setLoading(true);
+            try {
+                const res = await fetch(`http://localhost:5000/products/public/products/${id}`);
+                if (!res.ok) throw new Error("Failed to fetch product");
+                const data = await res.json();
+                const found = data.find((p: any) => p.id === id);
+                if (!found) throw new Error("Product not found");
+
+                setProduct({
+                    id: found.id,
+                    title: found.title,
+                    description: found.description || "",
+                    price: found.price,
+                    image: found.image,
+                    quantity: found.quantity || 0,
+                });
+            } catch (err) {
+                console.error(err);
+                alert("Failed to load product. Try again later.");
+            } finally {
                 setLoading(false);
-            })
-            .catch(() => setLoading(false));
+            }
+        };
+
+        fetchProduct();
     }, [id]);
 
     const handleAddToCart = async () => {
         if (!product) return;
 
-        try {
-            await addToCart(
-                {
-                    id: product.id,
-                    title: product.title,
-                    price: product.price,
-                    thumbnail: product.thumbnail,
-                    brand: product.brand,
-                    category: product.category,
-                },
-                quantity
-            );
-            alert(`✅ ${product.title} added to cart!`);
-            navigate("/cart");
-        } catch (error) {
-            alert("Failed to add item to cart. Please try again.");
+        if (!userEmail) {
+            await requireLogin();
+            return;
         }
+
+        const cartItem = cart.find((c) => c.id === product.id);
+        const currentQty = cartItem ? cartItem.quantity : 0;
+        if (currentQty + quantity > product.quantity) {
+            alert(`Only ${product.quantity - currentQty} items available`);
+            return;
+        }
+
+        addItem({
+            id: product.id,
+            title: product.title,
+            price: product.price,
+            quantity,
+            thumbnail: product.image || fallbackImage,
+            stock: product.quantity,
+        });
+
+        alert(`✅ ${product.title} added to cart!`);
+        navigate("/cart");
     };
 
-    if (loading)
-        return (
-            <div className="h-screen flex justify-center items-center text-[#023859] text-xl bg-gradient-to-b from-blue-50 via-white to-blue-50">
-                Loading...
-            </div>
-        );
-
-    if (!product)
-        return (
-            <div className="h-screen flex justify-center items-center text-[#023859] text-xl bg-gradient-to-b from-blue-50 via-white to-blue-50">
-                Product not found 😢
-            </div>
-        );
+    if (loading) return <div className="h-screen flex justify-center items-center">Loading...</div>;
+    if (!product) return <div className="h-screen flex justify-center items-center">Product not found 😢</div>;
 
     return (
-        <div className="fixed inset-0 flex justify-center items-center bg-gradient-to-r from-[#E6F0FA] via-white to-[#DCEBFA] overflow-hidden">
-            {/* Optional soft background glow */}
-            <div className="fixed inset-0 bg-[radial-gradient(circle_at_center,_rgba(5,110,165,0.05),_transparent_70%)] pointer-events-none"></div>
-
-            {/* Main Card */}
-            <div className="relative z-10 w-[85vw] max-w-6xl flex flex-col md:flex-row rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md bg-white/80 border border-gray-200">
-                {/* Left Section - Image */}
-                <div className="md:w-1/2 flex flex-col justify-center items-center p-6 bg-gradient-to-br from-[#F8FBFF] to-[#EAF4FF]">
-                    <div className="flex-1 flex justify-center items-center">
-                        {mainImage ? (
-                            <img
-                                src={mainImage}
-                                alt={product.title}
-                                onError={(event) => {
-                                    const target = event.currentTarget;
-                                    if (target.src !== fallbackImage) {
-                                        target.src = fallbackImage;
-                                        setMainImage(fallbackImage);
-                                    }
-                                }}
-                                className="w-[280px] h-[280px] object-cover rounded-3xl shadow-lg hover:scale-105 transition-transform duration-300"
-                            />
-                        ) : (
-                            <div className="w-[280px] h-[280px] flex items-center justify-center bg-gray-100 rounded-2xl text-gray-600 font-semibold shadow-inner">
-                                No Image
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Thumbnails */}
-                    <div className="flex justify-center gap-3 mt-4 flex-wrap">
-                        {product.images?.slice(0, 4).map((img, i) => (
-                            <img
-                                key={i}
-                                src={img}
-                                alt={`${product.title}-${i}`}
-                                onClick={() => setMainImage(img)}
-                                onError={(event) => {
-                                    const target = event.currentTarget;
-                                    if (target.src !== fallbackImage) {
-                                        target.src = fallbackImage;
-                                    }
-                                }}
-                                className={`w-16 h-16 object-cover rounded-xl cursor-pointer border-2 shadow-md transition-all ${mainImage === img
-                                    ? "border-[#056EA5] scale-110"
-                                    : "border-transparent hover:scale-105 hover:shadow-lg"
-                                    }`}
-                            />
-                        ))}
-                    </div>
+        <div className="flex justify-center items-center min-h-screen bg-gradient-to-r from-[#E6F0FA] via-white to-[#DCEBFA] p-6">
+            <div className="max-w-5xl w-full bg-white rounded-3xl shadow-2xl flex flex-col md:flex-row overflow-hidden">
+                {/* Left - Image */}
+                <div className="md:w-1/2 flex justify-center items-center p-6">
+                    <img
+                        src={product.image || fallbackImage}
+                        alt={product.title}
+                        className="w-80 h-80 object-cover rounded-2xl"
+                    />
                 </div>
 
-                {/* Right Section - Product Info */}
-                <div className="md:w-1/2 flex flex-col justify-between p-8 bg-white/70 backdrop-blur-md">
+                {/* Right - Info */}
+                <div className="md:w-1/2 p-8 flex flex-col justify-between">
                     <div>
-                        <h1 className="text-3xl font-bold text-[#023859] mb-3">
-                            {product.title}
-                        </h1>
-                        <p className="text-gray-700 text-base leading-relaxed mb-6">
-                            {product.description || "No description available."}
-                        </p>
+                        <h1 className="text-3xl font-bold text-[#023859]">{product.title}</h1>
+                        <p className="text-gray-700 mt-4">{product.description || "No description available."}</p>
+                        <p className="text-2xl font-extrabold text-[#056EA5] mt-6">${product.price.toFixed(2)}</p>
+                        <p className="text-sm text-gray-500 mt-1">Stock: {product.quantity}</p>
                     </div>
 
-                    {/* Price & Quantity */}
-                    <div className="flex flex-col gap-6">
-                        <p className="text-3xl font-extrabold text-[#056EA5]">
-                            ${product.price.toFixed(2)}
-                        </p>
-
-                        <div className="flex items-center gap-4">
-                            <span className="text-lg font-semibold text-[#023859]">
-                                Quantity:
-                            </span>
-                            <div className="flex items-center gap-2 bg-[#F0F7FF] px-4 py-2 rounded-lg border border-[#BFD7ED]">
-                                <button
-                                    onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                                    className="text-[#056EA5] text-xl font-bold px-2 hover:scale-110 transition-transform"
-                                >
-                                    -
-                                </button>
-                                <span className="text-lg font-semibold text-[#023859] w-6 text-center">
-                                    {quantity}
-                                </span>
-                                <button
-                                    onClick={() => setQuantity((q) => q + 1)}
-                                    className="text-[#056EA5] text-xl font-bold px-2 hover:scale-110 transition-transform"
-                                >
-                                    +
-                                </button>
-                            </div>
+                    <div className="mt-6 flex items-center gap-4">
+                        <span>Quantity:</span>
+                        <div className="flex items-center border rounded px-3 py-1 gap-2">
+                            <button onClick={() => setQuantity((q) => Math.max(1, q - 1))}>-</button>
+                            <span>{quantity}</span>
+                            <button onClick={() => setQuantity((q) => Math.min(product.quantity, q + 1))}>+</button>
                         </div>
+                    </div>
 
-                        {/* Buttons */}
-                        <div className="flex gap-4 mt-4">
-                            <button
-                                onClick={handleAddToCart}
-                                className="flex-1 bg-gradient-to-r from-[#056EA5] to-[#023859] text-white py-3 rounded-lg font-semibold shadow-md hover:opacity-90 hover:scale-[1.02] transition-all duration-200"
-                            >
-                                🛒 Add to Cart
-                            </button>
-                            <button
-                                onClick={() => navigate(-1)}
-                                className="flex-1 border border-[#056EA5] text-[#056EA5] hover:bg-[#056EA5] hover:text-white py-3 rounded-lg font-semibold transition-all duration-200 shadow-sm"
-                            >
-                                ← Back
-                            </button>
-                        </div>
+                    <div className="mt-6 flex gap-4">
+                        <button
+                            onClick={handleAddToCart}
+                            disabled={product.quantity <= 0}
+                            className={`flex-1 py-3 rounded-lg text-white font-semibold ${product.quantity <= 0 ? "bg-gray-400 cursor-not-allowed" : "bg-gradient-to-r from-[#056EA5] to-[#034F7B]"}`}
+                        >
+                            {product.quantity <= 0 ? "Out of Stock" : "🛒 Add to Cart"}
+                        </button>
+                        <button
+                            onClick={() => navigate(-1)}
+                            className="flex-1 py-3 border border-[#056EA5] rounded-lg text-[#056EA5] hover:bg-[#056EA5] hover:text-white transition-all"
+                        >
+                            ← Back
+                        </button>
                     </div>
                 </div>
             </div>

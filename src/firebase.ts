@@ -1,7 +1,13 @@
 // src/firebase.ts
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, FacebookAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore"; // ✅ import Firestore
+import {
+    getAuth,
+    GoogleAuthProvider,
+    FacebookAuthProvider,
+    onAuthStateChanged,
+    type User,
+} from "firebase/auth";
+import { getFirestore, doc, setDoc, serverTimestamp } from "firebase/firestore"; // ✅ import Firestore
 
 // Firebase config
 const firebaseConfig = {
@@ -24,3 +30,20 @@ export const facebookProvider = new FacebookAuthProvider();
 
 // ✅ Firestore setup (needed for orders)
 export const db = getFirestore(app);
+
+export const watchAuthAndEnsureProfile = (callback: (user: User | null) => void) =>
+    onAuthStateChanged(auth, async (user) => {
+        callback(user);
+        if (user?.email) {
+            const userRef = doc(db, "users", user.email);
+            await setDoc(
+                userRef,
+                {
+                    email: user.email,
+                    createdAt: serverTimestamp(),
+                    cart: [],
+                },
+                { merge: true }
+            );
+        }
+    });
