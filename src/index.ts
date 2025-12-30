@@ -1,25 +1,54 @@
-import * as functions from "firebase-functions";
-import * as admin from "firebase-admin";
-admin.initializeApp();
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+const Stripe = require("stripe");
 
-// Example function to update stock
-export const updateStockAfterPayment = functions.https.onCall(async (data: any, context) => {
-    // You can access Firestore via admin
-    const { items } = data; // array of { id, quantity }
-    const db = admin.firestore();
+admin.initializeApp();
+const firestore = admin.firestore();
+
+// Initialize Stripe with your secret key
+const stripe = new Stripe(functions.config().stripe.secret); // use Firebase functions config for security
+
+exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
+    const sig = req.headers["stripe-signature"];
+    let event;
 
     try {
-        for (const item of items) {
-            const productRef = db.collection("products").doc(item.id);
-            const snap = await productRef.get();
-            if (snap.exists) {
-                const newQty = snap.data()?.quantity - item.quantity;
-                await productRef.update({ quantity: newQty >= 0 ? newQty : 0 });
-            }
-        }
-        return { success: true };
+        event = stripe.webhooks.constructEvent(req.rawBody, sig, functions.config().stripe.webhook_secret);
     } catch (err) {
-        console.error(err);
-        throw new functions.https.HttpsError("internal", "Failed to update stock");
+        console.error("Webhook signature failed:", err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
     }
+
+    if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+        let items = [];
+
+        try {
+            items = JSON.parse(session.metadata.items);
+        } catch (err) {
+            console.error("Failed to parse session metadata:", err);
+            return res.status(400).send("Invalid metadata items");
+        }
+
+        for (const item of items) {
+            const productRef = firestore.collection("products").doc(item.id);
+
+            await firestore.runTransaction(async (t) => {
+                const productDoc = await t.get(productRef);
+                if (!productDoc.exists) return;
+
+                const currentStock = Number(productDoc.data().stock) || 0;
+                const newStock = currentStock - Number(item.quantity);
+
+                t.update(productRef, {
+                    stock: newStock >= 0 ? newStock : 0,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            });
+        }
+
+        console.log("✅ Stock updated for session:", session.id);
+    }
+
+    res.json({ received: true });
 });
