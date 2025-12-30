@@ -3,7 +3,7 @@ import * as admin from "firebase-admin";
 admin.initializeApp();
 
 // Example function to update stock
-export const updateStockAfterPayment = functions.https.onCall(async (data, context) => {
+export const updateStockAfterPayment = functions.https.onCall(async (data: any, context) => {
     // You can access Firestore via admin
     const { items } = data; // array of { id, quantity }
     const db = admin.firestore();
